@@ -1,0 +1,5 @@
+-r target_app/requirements.txt
+-r opspilot/requirements.txt
+pytest>=8
+httpx>=0.27
+locust>=2.32

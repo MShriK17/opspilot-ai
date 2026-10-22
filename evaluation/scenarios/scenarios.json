@@ -1,0 +1,57 @@
+{
+  "bad_deploy": {
+    "description": "v2.0.0 pricing code crashes when a checkout has no coupon",
+    "deploy_event": {
+      "version": "v2.0.0",
+      "git_sha": "a1b2c3d",
+      "change_summary": "Add percentage coupon support to checkout pricing",
+      "config_diff": null
+    },
+    "ground_truth_cause": "New version v2.0.0 introduced a code bug in checkout pricing",
+    "ground_truth_category": "bad_deploy",
+    "correct_playbook": "rollback_deployment"
+  },
+  "db_pool_exhausted": {
+    "description": "DB pool shrinks to 2 and queries become slow",
+    "deploy_event": {
+      "version": "v1.0.0",
+      "git_sha": null,
+      "change_summary": "Config change: reduce database pool size",
+      "config_diff": {"DB_POOL_SIZE": ["10", "2"]}
+    },
+    "ground_truth_cause": "Database connection pool exhaustion",
+    "ground_truth_category": "resource_exhaustion",
+    "correct_playbook": "revert_config"
+  },
+  "slow_dependency": {
+    "description": "Payment gateway becomes slow and times out",
+    "deploy_event": null,
+    "ground_truth_cause": "Downstream payment-gateway latency and timeouts",
+    "ground_truth_category": "dependency_failure",
+    "correct_playbook": "toggle_feature_flag"
+  },
+  "memory_leak": {
+    "description": "v1.1.0 in-memory cache never frees memory",
+    "deploy_event": {
+      "version": "v1.1.0",
+      "git_sha": "d4e5f6a",
+      "change_summary": "Add in-memory response cache for checkout",
+      "config_diff": null
+    },
+    "ground_truth_cause": "Memory leak introduced by v1.1.0 cache",
+    "ground_truth_category": "resource_exhaustion",
+    "correct_playbook": "rollback_deployment"
+  },
+  "bad_env_var": {
+    "description": "Database host environment variable is wrong",
+    "deploy_event": {
+      "version": "v1.0.0",
+      "git_sha": null,
+      "change_summary": "Config change: update database host",
+      "config_diff": {"DATABASE_HOST": ["postgres", "db-prod-typo"]}
+    },
+    "ground_truth_cause": "Misconfigured DATABASE_HOST environment variable",
+    "ground_truth_category": "config_error",
+    "correct_playbook": "revert_config"
+  }
+}

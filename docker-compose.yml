@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-opspilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-opspilot}
+      POSTGRES_DB: ${POSTGRES_DB:-opspilot}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-opspilot} -d ${POSTGRES_DB:-opspilot}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  target-app:
+    build: ./target_app
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-opspilot}:${POSTGRES_PASSWORD:-opspilot}@postgres:5432/${POSTGRES_DB:-opspilot}
+      LOG_FILE: /var/log/target/app.log
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-dev-token}
+    volumes:
+      - applogs:/var/log/target
+    ports:
+      - "8000:8000"
+    mem_limit: 768m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  collector:
+    build:
+      context: .
+      dockerfile: opspilot/Dockerfile
+    environment:
+      OPSPILOT_DATABASE_URL: postgresql://${POSTGRES_USER:-opspilot}:${POSTGRES_PASSWORD:-opspilot}@postgres:5432/${POSTGRES_DB:-opspilot}
+      LOG_FILE: /var/log/target/app.log
+      TARGET_METRICS_URL: http://target-app:8000/metrics
+    volumes:
+      - applogs:/var/log/target:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      target-app:
+        condition: service_healthy
+    restart: unless-stopped
+
+  load-generator:
+    image: locustio/locust:2.32.4
+    command: -f /mnt/locust/locustfile.py --headless -u 5 -r 1 --host http://target-app:8000
+    volumes:
+      - ./load_generator:/mnt/locust:ro
+    depends_on:
+      target-app:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  applogs:

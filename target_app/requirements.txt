@@ -1,0 +1,5 @@
+fastapi>=0.115,<0.130
+uvicorn[standard]>=0.30,<0.40
+sqlalchemy>=2.0,<2.1
+psycopg2-binary>=2.9,<3
+psutil>=5.9,<7
