@@ -1,7 +1,7 @@
 SCENARIO ?= bad_deploy
 PSQL = docker compose exec -T postgres psql -U opspilot -d opspilot
 
-.PHONY: up down nuke break heal status scenarios logs psql counts recent-errors test
+.PHONY: up down nuke break heal status scenarios logs psql counts recent-errors features templates migrate test
 
 up:
 	docker compose up -d --build
@@ -36,6 +36,15 @@ counts:
 
 recent-errors:
 	$(PSQL) -c "SELECT ts, message FROM log_events WHERE level='ERROR' ORDER BY ts DESC LIMIT 10;"
+
+features:
+	python scripts/show_features.py --minutes 10
+
+templates:
+	python scripts/show_features.py --templates --minutes 10
+
+migrate:
+	docker compose run --rm migrate
 
 test:
 	pytest -q

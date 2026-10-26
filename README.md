@@ -2,7 +2,7 @@
 
 An AI agent that investigates production incidents: it detects the problem, gathers evidence from logs, metrics and deploy history, consults runbooks, ranks likely root causes with citations, proposes a fix for **human approval**, and verifies whether the fix worked.
 
-**Status: Week 1 of 10 - Foundation.** A target app you can break on purpose, load traffic, and a collector that stores logs and metrics in Postgres. Detection, RAG and the agent come in later weeks.
+**Status: Week 2 of 10 - Templates and features.** A target app you can break on purpose, a collector that stores logs and metrics, and a worker that turns raw logs into log templates and per-minute features. Detection, RAG and the agent come in later weeks.
 
 ## Quick start
 
@@ -13,7 +13,7 @@ pip install -r requirements-dev.txt
 make up                                                  # builds and starts everything
 ```
 
-Services: `postgres` (5432), `target-app` (8000), `collector`, `load-generator` (5 simulated users).
+Services: `postgres` (5432), `migrate` (runs once, then exits - this is normal), `target-app` (8000), `collector`, `worker`, `load-generator` (5 simulated users).
 
 ### Check that it works (this is the Week 1 "done" test)
 
@@ -25,6 +25,18 @@ make recent-errors   # TypeError lines from /checkout
 curl localhost:8000/metrics
 make heal
 ```
+
+### Week 2 check: see templates and per-minute features
+
+```bash
+python scripts/inject_failure.py start bad_deploy
+# wait 60 seconds
+python scripts/show_features.py                 # per-minute requests, error %, p95, top error template
+python scripts/show_features.py --templates     # most frequent log templates
+python scripts/inject_failure.py reset
+```
+
+You should see one minute row where `ERR%` jumps, the version changes to `v2.0.0`, and the top error template is `TypeError: 'NoneType' object is not subscriptable`.
 
 ## Failure scenarios
 
@@ -48,12 +60,17 @@ Commands: `make scenarios` (list), `make break SCENARIO=<name>`, `make status`, 
 | `load_generator/` | Locust traffic: browse, checkout (30% with coupon), order lookup |
 | `opspilot/ingestion/collector.py` | Tails the JSON log file and polls `/metrics` every 10 s into Postgres. Log offsets are saved in the same transaction as the rows, so restarts never duplicate lines |
 | `scripts/inject_failure.py` | Starts and heals a scenario, records the deploy or config event and the injection window in Postgres |
-| `migrations/001_init.sql` | Week 1 tables, run automatically on first Postgres start |
+| `migrations/` | Alembic migrations (plain SQL). `0001` Week 1 tables, `0002` templates and features. Run by the `migrate` service on every `docker compose up` |
+| `opspilot/processing/drain_parser.py` | Drain3 log template mining. Templates are keyed by Drain cluster id, so a template can generalise without splitting its history. If the saved Drain state is lost, the service is re-mined from scratch |
+| `opspilot/processing/features.py` | Builds `minute_features` and `template_minute_counts` from logs. Recomputes the last few minutes each cycle so partly filled minutes self-correct |
+| `opspilot/worker/scheduler.py` | Every 10 seconds: template new logs, refresh features |
 
 ## Tests
 
 ```bash
-make test        # 15 tests: app behaviour for every scenario, connection gate, log parser
+make test        # 24 tests. Unit tests always run; integration tests need Postgres
+# integration tests wipe the database they run against, so its name must contain 'test':
+#   TEST_DATABASE_URL=postgresql://opspilot:opspilot@localhost:5432/opspilot_test pytest
 ```
 
 ## Honest notes
@@ -65,7 +82,7 @@ make test        # 15 tests: app behaviour for every scenario, connection gate, 
 ## Roadmap
 
 - [x] Week 1: target app, chaos, load, collector, schema
-- [ ] Week 2: Drain3 log templates, per-minute features
-- [ ] Week 3: anomaly detection and incident manager
+- [x] Week 2: Drain3 log templates, per-minute features, Alembic migrations
+- [ ] Week 3: anomaly detection and incident manager (with the incident state machine)
 - [ ] Week 4: runbooks and RAG
 - [ ] Weeks 5-10: agent, guardrails, approval and verification, evaluation, UI, deployment

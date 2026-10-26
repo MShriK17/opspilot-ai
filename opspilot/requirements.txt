@@ -1,2 +1,5 @@
 psycopg2-binary>=2.9,<3
 requests>=2.31,<3
+drain3>=0.9.11,<1
+alembic>=1.13,<2
+SQLAlchemy>=2.0,<2.1

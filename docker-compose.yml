@@ -1,3 +1,11 @@
+x-opspilot-build: &opspilot-build
+  build:
+    context: .
+    dockerfile: opspilot/Dockerfile
+
+x-opspilot-env: &opspilot-env
+  OPSPILOT_DATABASE_URL: postgresql://${POSTGRES_USER:-opspilot}:${POSTGRES_PASSWORD:-opspilot}@postgres:5432/${POSTGRES_DB:-opspilot}
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -9,12 +17,21 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-opspilot} -d ${POSTGRES_DB:-opspilot}"]
       interval: 3s
       timeout: 3s
       retries: 20
+
+  # Runs Alembic migrations once, then exits. Everything that uses the database waits for it.
+  migrate:
+    <<: *opspilot-build
+    command: alembic upgrade head
+    environment: *opspilot-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   target-app:
     build: ./target_app
@@ -37,20 +54,32 @@ services:
       retries: 10
 
   collector:
-    build:
-      context: .
-      dockerfile: opspilot/Dockerfile
+    <<: *opspilot-build
+    command: python -m opspilot.ingestion.collector
     environment:
-      OPSPILOT_DATABASE_URL: postgresql://${POSTGRES_USER:-opspilot}:${POSTGRES_PASSWORD:-opspilot}@postgres:5432/${POSTGRES_DB:-opspilot}
+      <<: *opspilot-env
       LOG_FILE: /var/log/target/app.log
       TARGET_METRICS_URL: http://target-app:8000/metrics
     volumes:
       - applogs:/var/log/target:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       target-app:
         condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    <<: *opspilot-build
+    command: python -m opspilot.worker.scheduler
+    environment:
+      <<: *opspilot-env
+      DRAIN_STATE_DIR: /state
+    volumes:
+      - drainstate:/state
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   load-generator:
@@ -66,3 +95,4 @@ services:
 volumes:
   pgdata:
   applogs:
+  drainstate:
