@@ -2,7 +2,7 @@
 
 An AI agent that investigates production incidents: it detects the problem, gathers evidence from logs, metrics and deploy history, consults runbooks, ranks likely root causes with citations, proposes a fix for **human approval**, and verifies whether the fix worked.
 
-**Status: Week 2 of 10 - Templates and features.** A target app you can break on purpose, a collector that stores logs and metrics, and a worker that turns raw logs into log templates and per-minute features. Detection, RAG and the agent come in later weeks.
+**Status: Week 3 of 10 - Detection and incidents.** A target app you can break on purpose, a collector, and a worker that turns logs into templates and per-minute features, detects anomalies, and opens incidents with a severity and a strict life cycle. Runbook RAG and the agent come next.
 
 ## Quick start
 
@@ -38,6 +38,32 @@ python scripts/inject_failure.py reset
 
 You should see one minute row where `ERR%` jumps, the version changes to `v2.0.0`, and the top error template is `TypeError: 'NoneType' object is not subscriptable`.
 
+### Week 3 check: detection and incidents
+
+```bash
+python scripts/inject_failure.py start bad_deploy
+# wait 20 seconds
+python scripts/show_incidents.py              # an incident, with seconds between injection and detection
+python scripts/show_incidents.py --id 1       # its signals and status history
+python scripts/inject_failure.py reset        # the incident closes by itself about 2.5 minutes later
+```
+
+Detection times measured on a laptop with 5 simulated users: `bad_env_var` 5 s, `db_pool_exhausted` 5 s,
+`bad_deploy` 8 s, `slow_dependency` 8 s, `memory_leak` 18 s. Severity rises as a failure develops
+(for example SEV2 to SEV1), and each change is recorded.
+
+**Warm-up:** error-rate and new-error detection work from the first request. Latency and memory detection
+compare against the last ~30 minutes of history, so they start working after about 5 minutes of healthy traffic.
+
+| Detector | Fires when (last 30 s vs. baseline median) | Severity |
+|---|---|---|
+| `error_rate` | 5xx rate above 5% and well above normal, at least 5 errors | 5% SEV3, 20% SEV2, 50% SEV1 |
+| `latency` | p95 above 250 ms and 3x normal | SEV3, or SEV2 above 2 s |
+| `memory_growth` | memory 40 MB above normal | SEV3, or SEV2 above 200 MB |
+| `new_error_template` | an error type not seen in the baseline window, 3+ times | SEV3 |
+
+Incident life cycle and rules: [docs/incident-state-machine.md](docs/incident-state-machine.md).
+
 ## Failure scenarios
 
 | Scenario | What you will see | Root cause (ground truth) | Correct fix |
@@ -63,12 +89,15 @@ Commands: `make scenarios` (list), `make break SCENARIO=<name>`, `make status`, 
 | `migrations/` | Alembic migrations (plain SQL). `0001` Week 1 tables, `0002` templates and features. Run by the `migrate` service on every `docker compose up` |
 | `opspilot/processing/drain_parser.py` | Drain3 log template mining. Templates are keyed by Drain cluster id, so a template can generalise without splitting its history. If the saved Drain state is lost, the service is re-mined from scratch |
 | `opspilot/processing/features.py` | Builds `minute_features` and `template_minute_counts` from logs. Recomputes the last few minutes each cycle so partly filled minutes self-correct |
-| `opspilot/worker/scheduler.py` | Every 10 seconds: template new logs, refresh features |
+| `opspilot/detection/detectors.py` | The four detectors. Decision rules are pure functions, so they are unit tested without a database. Baselines use median and MAD, so a long-running failure cannot hide itself |
+| `opspilot/incidents/state_machine.py` | Allowed status changes, enforced inside the database transaction, with an audit row for each |
+| `opspilot/incidents/manager.py` | Opens an incident or attaches signals to the active one, raises severity, closes quiet incidents |
+| `opspilot/worker/scheduler.py` | Every 10 seconds: template new logs, refresh features, run detectors, update incidents |
 
 ## Tests
 
 ```bash
-make test        # 24 tests. Unit tests always run; integration tests need Postgres
+make test        # 73 tests. Unit tests always run; integration tests need Postgres
 # integration tests wipe the database they run against, so its name must contain 'test':
 #   TEST_DATABASE_URL=postgresql://opspilot:opspilot@localhost:5432/opspilot_test pytest
 ```
@@ -83,6 +112,6 @@ make test        # 24 tests. Unit tests always run; integration tests need Postg
 
 - [x] Week 1: target app, chaos, load, collector, schema
 - [x] Week 2: Drain3 log templates, per-minute features, Alembic migrations
-- [ ] Week 3: anomaly detection and incident manager (with the incident state machine)
+- [x] Week 3: anomaly detection, incident manager, incident state machine
 - [ ] Week 4: runbooks and RAG
 - [ ] Weeks 5-10: agent, guardrails, approval and verification, evaluation, UI, deployment
